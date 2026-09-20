@@ -1,4 +1,3 @@
-import html.parser
 """Utilities for working with HTML."""
 
 import logging
@@ -132,6 +131,9 @@ def extract_sub_links(
         results.append(path)
     return results
 
+import html
+import html.parser
+
 
 class _InvisibleElementPruner(html.parser.HTMLParser):
     def __init__(self, *, preserve_aria: bool = True):
@@ -170,7 +172,6 @@ class _InvisibleElementPruner(html.parser.HTMLParser):
             is_invis = True
 
         if is_invis:
-            # Check if this element should be preserved under ARIA accessibility rules
             classes = (attr_dict.get("class") or "").split()
             if self.preserve_aria and any(c in ("sr-only", "visually-hidden") for c in classes):
                 is_invis = False
@@ -179,7 +180,14 @@ class _InvisibleElementPruner(html.parser.HTMLParser):
             self.invisible_depth = 1
             return
 
-        attr_str = "".join(f' {k}="{v}"' if v is not None else f" {k}" for k, v in attrs)
+        # Re-escape attribute values to prevent attribute breakout and XSS
+        attr_parts = []
+        for k, v in attrs:
+            if v is not None:
+                attr_parts.append(f' {k}="{html.escape(v, quote=True)}"')
+            else:
+                attr_parts.append(f" {k}")
+        attr_str = "".join(attr_parts)
         self.output.append(f"<{tag}{attr_str}>")
 
     def handle_endtag(self, tag: str) -> None:
@@ -190,15 +198,19 @@ class _InvisibleElementPruner(html.parser.HTMLParser):
 
     def handle_data(self, data: str) -> None:
         if self.invisible_depth == 0:
-            self.output.append(data)
+            # Re-escape character references in text nodes so encoded markup is not executed as active HTML
+            self.output.append(html.escape(data, quote=False))
 
 
 def prune_invisible_elements(raw_html: str, *, preserve_aria: bool = True) -> str:
-    """Prune invisible, hidden, and off-screen DOM elements from HTML.
+    """Prune invisible, hidden, and off-screen DOM elements from HTML for LLM text extraction.
 
     This strips opportunistic adversarial content (e.g. zero-pixel font,
     display:none, negative text-indent injections) while explicitly preserving
     accessibility markers (e.g. screen-reader text with .sr-only).
+
+    Note: This utility is intended for LLM text ingestion and document parsing,
+    not for generating browser-rendered safe HTML.
 
     Args:
         raw_html: The input raw HTML string.
@@ -206,7 +218,8 @@ def prune_invisible_elements(raw_html: str, *, preserve_aria: bool = True) -> st
             accessibility (e.g. classes 'sr-only', 'visually-hidden'). Defaults to True.
 
     Returns:
-        The sanitized HTML string with invisible DOM elements removed.
+        The filtered HTML string with invisible DOM elements removed and character
+        references safely escaped.
     """
     parser = _InvisibleElementPruner(preserve_aria=preserve_aria)
     parser.feed(raw_html)
