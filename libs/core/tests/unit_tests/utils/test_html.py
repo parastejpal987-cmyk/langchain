@@ -209,6 +209,7 @@ def test_extract_sub_links_with_query() -> None:
     assert actual == expected, f"Expected {expected}, but got {actual}"
 
 
+
 def test_prune_invisible_elements_hidden_styles() -> None:
     from langchain_core.utils.html import prune_invisible_elements
 
@@ -263,3 +264,14 @@ def test_prune_invisible_elements_script_and_style_tags() -> None:
     assert "Safe text" in cleaned
     assert "alert(1)" not in cleaned
     assert "color: red" not in cleaned
+
+
+def test_prune_invisible_elements_escapes_decoded_charrefs() -> None:
+    from langchain_core.utils.html import prune_invisible_elements
+
+    # Encoded characters should not turn into unescaped active markup
+    html_input = '<p>&lt;img src=x onerror=alert(1)&gt;</p><div title="&quot; onclick=alert(1)">content</div>'
+    cleaned = prune_invisible_elements(html_input)
+    assert "<img src=x" not in cleaned
+    assert "&lt;img src=x onerror=alert(1)&gt;" in cleaned
+    assert '&quot;' in cleaned or '&#34;' in cleaned
